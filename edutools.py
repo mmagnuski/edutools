@@ -1,14 +1,10 @@
 import re
-import os
-import os.path as op
-import json
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import Header
 
 import numpy as np
-import pandas as pd
 
 
 depol_dct = {'ę': 'e', 'ó': 'o', 'ń': 'n', 'ą': 'a', 'ł': 'l', 'ż': 'z',
@@ -77,13 +73,15 @@ def find_email_df(df_col, imnzw):
     # TODO - notfound behavior (default: error?)
     if len(df_res_idx) == 0:
         print(imnzw)
+    else:
+        return df_res_idx[0]
 
 
 def find_email(maile, imnzw):
     '''TODO'''
     if isinstance(imnzw, list):
         assert len(imnzw) == 2
-        imie, nazwisko = [depol(x.lower()) for x in imnzw]
+        imię, nazwisko = [depol(x.lower()) for x in imnzw]
         good_lines = np.array([imię in line and nazwisko in line
                                for line in maile])
     else:
@@ -190,7 +188,7 @@ def mailsender(wyniki, message=None, subject=None, server=None,
         Additional list of e-mails. Provided when dataframe does not contain
         student emails.
     dry_run: bool
-        If ``True`` does not send email but only shows what would be sent to
+        If ``True`` does not send emails but only shows what would be sent to
         three randomly chosen students.
     '''
     if server is None and not dry_run:
@@ -199,19 +197,6 @@ def mailsender(wyniki, message=None, subject=None, server=None,
         raise RuntimeError('You need to provide an email message text.')
     if subject is None:
         subject = "Wyniki"
-
-    # check student column
-    check_student_columns = ['student', 'imnzw', 'name', 'imie', 'imię']
-    student_col = [col for col in check_student_columns
-                   if col in wyniki.columns]
-    if len(student_col) == 0:
-        raise ValueError('Could not find student column, has to be either:'
-                         ', '.joint(check_student_columns[:-1]) + ' or '
-                         + check_student_columns[-1])
-    else:
-        # TODO: warn that more student cols than one, using the first one
-        # TODO: addtional arg student_column
-        student_col = student_col[0]
 
     # check email list
     if email_list is None:
@@ -223,9 +208,25 @@ def mailsender(wyniki, message=None, subject=None, server=None,
                                ' results data frame.')
         else:
             email_col = email_col[0]
+    
+    # check student column
+    check_student_columns = ['student', 'imnzw', 'name', 'imie', 'imię']
+    student_col = [col for col in check_student_columns
+                   if col in wyniki.columns]
+    if len(student_col) == 0:
+        if email_list is None:
+            student_col = email_col
+        else:
+            raise ValueError('Could not find student column, has to be either:'
+                             ', '.join(check_student_columns[:-1]) + ' or '
+                             + check_student_columns[-1])
+    else:
+        # TODO: warn that more student cols than one, using the first one
+        # TODO: addtional arg student_column
+        student_col = student_col[0]
 
     # evaluate column names in message
-    pattern = r'\{([a-z_]+)\}'
+    pattern = r'\{([ a-z_0-9\-]+)\}'
     use_columns = re.findall(pattern, message)
     could_not_find_columns = [col for col in use_columns
                               if col not in wyniki.columns]
@@ -252,6 +253,10 @@ def mailsender(wyniki, message=None, subject=None, server=None,
             if not np.isnan(sent_val) and sent_val:
                 continue
 
+        # ignore maxval row
+        if maxval_idx is not None and idx == maxval_idx:
+            continue
+
         # format column values according to message
         format_dict = format_columns_for_message(wyniki, idx, use_columns,
                                                  maxval_idx=maxval_idx)
@@ -259,7 +264,7 @@ def mailsender(wyniki, message=None, subject=None, server=None,
 
         student = wyniki.loc[idx, student_col]
         if email_list is not None:
-            imnzw = imnzw.split() if ' ' in student else student
+            imnzw = student.split() if ' ' in student else student
             send_to = find_email(email_list, imnzw)
         else:
             send_to = wyniki.loc[idx, email_col]
