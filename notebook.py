@@ -299,3 +299,23 @@ def cell_contains(cells, pattern):
                 has_txt.append(cell_idx)
                 continue
     return has_txt
+
+
+# - [ ] unify with cell_contains
+def find_cell_containing_text(nb1, find_text):
+    hastext = list()
+    n_cells = len(nb1['cells'])
+    for idx in range(n_cells):
+        contents = nb1['cells'][idx]['source']
+
+        deepnote_nb = 'deepnote_cell_type' in nb1['cells'][idx]['metadata']
+        shortlist = isinstance(contents, list) and len(contents) == 1
+        if deepnote_nb:
+            if shortlist:
+                contents = contents[0].split('\n')
+            elif isinstance(contents, str):
+                contents = contents.split('\n')
+
+        hasit = any([find_text in line for line in contents])
+        hastext.append(hasit)
+    return hastext
