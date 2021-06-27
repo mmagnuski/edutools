@@ -1,14 +1,10 @@
 import re
-import os
-import os.path as op
-import json
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import Header
 
 import numpy as np
-import pandas as pd
 
 
 depol_dct = {'ę': 'e', 'ó': 'o', 'ń': 'n', 'ą': 'a', 'ł': 'l', 'ż': 'z',
@@ -77,13 +73,15 @@ def find_email_df(df_col, imnzw):
     # TODO - notfound behavior (default: error?)
     if len(df_res_idx) == 0:
         print(imnzw)
+    else:
+        return df_res_idx[0]
 
 
 def find_email(maile, imnzw):
     '''TODO'''
     if isinstance(imnzw, list):
         assert len(imnzw) == 2
-        imie, nazwisko = [depol(x.lower()) for x in imnzw]
+        imię, nazwisko = [depol(x.lower()) for x in imnzw]
         good_lines = np.array([imię in line and nazwisko in line
                                for line in maile])
     else:
@@ -190,7 +188,7 @@ def mailsender(wyniki, message=None, subject=None, server=None,
         Additional list of e-mails. Provided when dataframe does not contain
         student emails.
     dry_run: bool
-        If ``True`` does not send email but only shows what would be sent to
+        If ``True`` does not send emails but only shows what would be sent to
         three randomly chosen students.
     '''
     if server is None and not dry_run:
@@ -199,19 +197,6 @@ def mailsender(wyniki, message=None, subject=None, server=None,
         raise RuntimeError('You need to provide an email message text.')
     if subject is None:
         subject = "Wyniki"
-
-    # check student column
-    check_student_columns = ['student', 'imnzw', 'name', 'imie', 'imię']
-    student_col = [col for col in check_student_columns
-                   if col in wyniki.columns]
-    if len(student_col) == 0:
-        raise ValueError('Could not find student column, has to be either:'
-                         ', '.joint(check_student_columns[:-1]) + ' or '
-                         + check_student_columns[-1])
-    else:
-        # TODO: warn that more student cols than one, using the first one
-        # TODO: addtional arg student_column
-        student_col = student_col[0]
 
     # check email list
     if email_list is None:
@@ -223,9 +208,25 @@ def mailsender(wyniki, message=None, subject=None, server=None,
                                ' results data frame.')
         else:
             email_col = email_col[0]
+    
+    # check student column
+    check_student_columns = ['student', 'imnzw', 'name', 'imie', 'imię']
+    student_col = [col for col in check_student_columns
+                   if col in wyniki.columns]
+    if len(student_col) == 0:
+        if email_list is None:
+            student_col = email_col
+        else:
+            raise ValueError('Could not find student column, has to be either:'
+                             ', '.join(check_student_columns[:-1]) + ' or '
+                             + check_student_columns[-1])
+    else:
+        # TODO: warn that more student cols than one, using the first one
+        # TODO: addtional arg student_column
+        student_col = student_col[0]
 
     # evaluate column names in message
-    pattern = r'\{([a-z_]+)\}'
+    pattern = r'\{([ a-z_0-9\-]+)\}'
     use_columns = re.findall(pattern, message)
     could_not_find_columns = [col for col in use_columns
                               if col not in wyniki.columns]
@@ -252,6 +253,10 @@ def mailsender(wyniki, message=None, subject=None, server=None,
             if not np.isnan(sent_val) and sent_val:
                 continue
 
+        # ignore maxval row
+        if maxval_idx is not None and idx == maxval_idx:
+            continue
+
         # format column values according to message
         format_dict = format_columns_for_message(wyniki, idx, use_columns,
                                                  maxval_idx=maxval_idx)
@@ -259,7 +264,7 @@ def mailsender(wyniki, message=None, subject=None, server=None,
 
         student = wyniki.loc[idx, student_col]
         if email_list is not None:
-            imnzw = imnzw.split() if ' ' in student else student
+            imnzw = student.split() if ' ' in student else student
             send_to = find_email(email_list, imnzw)
         else:
             send_to = wyniki.loc[idx, email_col]
@@ -290,90 +295,3 @@ def format_columns_for_message(wyniki, idx, use_columns, maxval_idx=None):
             value_txt = formatuj_wynik(pnts=value, max_pnts=maxval)
         format_dict[col] = value_txt
     return format_dict
-
-
-def read_nb(nb_file):
-    '''Read a notebook file.'''
-    with open(nb_file, 'r', encoding='utf-8') as content_file:
-        content = content_file.read()
-    data = json.loads(content)
-    return data
-
-
-def execute_cell(nb, cell):
-    exec(nb["cells"][cell]["source"][0])
-
-
-# - [ ] TODO: match='exact' vs match='similarity'
-def compare_cell_code(nb0, nb1):
-    '''Compare code of all code cells between two notebooks.'''
-    n_cells = len(nb1['cells'])
-    is_exact = np.ones(n_cells, dtype='bool')
-
-    for cell_idx in range(n_cells):
-        if nb1['cells'][cell_idx]['cell_type'] == 'code':
-            is_exact[cell_idx] = (nb1['cells'][cell_idx]['source']
-                                  == nb0['cells'][cell_idx]['source'])
-    return is_exact
-
-
-def full_compare_cells(nb0, nb1):
-    '''Comapre every pair of notebook cells.'''
-    n_cells0 = len(nb0['cells'])
-    n_cells1 = len(nb1['cells'])
-    cell_exact = np.zeros((n_cells0, n_cells1), dtype='bool')
-
-    for cell_idx0 in range(n_cells0):
-        cell0 = nb0['cells'][cell_idx0]['source']
-        for cell_idx1 in range(n_cells1):
-            cell1 = nb1['cells'][cell_idx1]['source']
-            cell_exact[cell_idx0, cell_idx1] = cell0 == cell1
-    return cell_exact
-
-
-def remove_unrelated_cells(nb0, nb1, start_idx):
-    '''Remove additional cells from the second notebook (nb1) that are not
-    present in the original notebook (nb0).'''
-
-    isit = list()
-    for next_idx in range(start_idx, len(nb1['cells'])):
-        the_same = nb0['cells'][start_idx]['source'] == nb1['cells'][next_idx]['source']
-        if the_same:
-            break
-
-    if the_same:
-        steps = next_idx - start_idx
-        for xx in range(steps):
-            nb1['cells'].pop(start_idx)
-
-
-def find_same_notebooks(df, nb_dir):
-    n_cells = list()
-    for student in df.student:
-        nb = read_nb(op.join(nb_dir, student + '.ipynb'))
-        n_cells.append(len(nb['cells']))
-
-    n_nb = len(n_cells)
-    same_cells = np.zeros((n_nb, n_nb), dtype='bool')
-    same_nb = same_cells.copy()
-
-    for s_idx in range(n_nb - 1):
-        # find next same num of cells:
-        same_numcell = np.where(np.array(n_cells[s_idx + 1:]) == n_cells[s_idx])[0]
-        same_numcell += s_idx + 1
-        if len(same_numcell) > 0:
-            nb1 = read_nb(op.join(nb_dir, df.student[s_idx] + '.ipynb'))
-
-        for s2_idx in same_numcell:
-            nb2 = read_nb(op.join(nb_dir, df.student[s2_idx] + '.ipynb'))
-            same_cells[s_idx, s2_idx] = compare_cell_code(nb1, nb2).all()
-            same_nb[s_idx, s2_idx] = nb1 == nb2
-
-    return same_cells, same_nb
-
-
-def get_execution_count(nb):
-    exec_cnt = [nb['cells'][idx]['execution_count']
-                for idx in range(len(nb['cells']))
-                if 'execution_count' in nb['cells'][idx]]
-    return exec_cnt
