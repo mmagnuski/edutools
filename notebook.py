@@ -232,24 +232,35 @@ def eval_cells(cells, notebook=None):
 
     # group code lines in each cell
     all_line_groups = list()
+    is_code_cell = list()
+    is_deepnote_cell = list()
     for cell in cells:
-        assert cell['cell_type'] == 'code'
+        is_code_cell.append(cell['cell_type'] == 'code')
+        is_deepnote_cell.append('deepnote_cell_type' in cell['metadata'])
 
-        cell_code = cell['source']
-        line_groups = _group_code_lines(cell_code)
-        all_line_groups.append(line_groups)
+        if not is_deepnote_cell[-1]:
+            cell_code = cell['source']
+            line_groups = _group_code_lines(cell_code)
+            all_line_groups.append(line_groups)
 
     before = list(locals().keys())
+    before.append('before')
 
     # evaluate lines
     for idx, cell in enumerate(cells):
-        line_groups = all_line_groups[idx]
-        for grp in line_groups:
-            start, fin = grp[0], grp[-1] + 1
-            lines = ''.join(cell['source'][start:fin])
-            exec(lines)
+        if is_code_cell[idx]:
+            if not is_deepnote_cell[idx]:
+                line_groups = all_line_groups[idx]
+                for grp in line_groups:
+                    start, fin = grp[0], grp[-1] + 1
+                    lines = ''.join(cell['source'][start:fin])
+                    exec(lines)
+            else:
+                exec(''.join(cell['source']))
 
-    del start, fin, lines, grp, idx, cell
+    if not is_deepnote_cell[idx]:
+        del start, fin, lines, grp
+    del idx, cell
 
     # find created variables
     locals_after = locals()
